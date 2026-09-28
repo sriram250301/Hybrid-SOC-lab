@@ -1,6 +1,8 @@
 import subprocess
 import re
+import json
 from collections import Counter
+from datetime import datetime
 
 # Get SSH logs from the last 10 minutes
 command = [
@@ -21,7 +23,7 @@ events = []
 
 for line in logs:
 
-    # Detect invalid username attempts
+    # Invalid username
     match = re.search(r"Invalid user (\S+) from ([0-9.]+)", line)
 
     if match:
@@ -35,8 +37,11 @@ for line in logs:
             "log": line
         })
 
-    # Detect failed password attempts
-    match = re.search(r"Failed password for (?:invalid user )?(\S+) from ([0-9.]+)", line)
+    # Failed authentication
+    match = re.search(
+        r"Failed password for (?:invalid user )?(\S+) from ([0-9.]+)",
+        line
+    )
 
     if match:
         username = match.group(1)
@@ -51,7 +56,7 @@ for line in logs:
 
 
 print("====================================")
-print("       SSH DETECTION ENGINE v2")
+print("       SSH DETECTION ENGINE v3")
 print("====================================")
 
 print(f"\nTotal suspicious SSH events: {len(events)}")
@@ -61,32 +66,47 @@ if not events:
     exit()
 
 
-# Count events by source IP
+# Group events by source IP
 ip_counts = Counter(event["source_ip"] for event in events)
 
-
-print("\nDetected activity:")
+alerts = []
 
 for ip, count in ip_counts.items():
 
-    print(f"\nSource IP: {ip}")
-    print(f"Attempts: {count}")
-
-    # Show usernames used by this source
-    usernames = set(
+    usernames = list(set(
         event["username"]
         for event in events
         if event["source_ip"] == ip
-    )
-
-    print(f"Usernames attempted: {', '.join(usernames)}")
+    ))
 
     if count >= 5:
 
+        alert = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "detection": "SSH Brute Force",
+            "source_ip": ip,
+            "attempts": count,
+            "usernames": usernames,
+            "mitre_attack": "T1110",
+            "severity": "medium"
+        }
+
+        alerts.append(alert)
+
         print("\n[ALERT] SSH BRUTE-FORCE ACTIVITY DETECTED")
-        print("MITRE ATT&CK: T1110 - Brute Force")
-        print("Detection severity: MEDIUM")
+        print(f"Source IP: {ip}")
+        print(f"Attempts: {count}")
+        print(f"Usernames: {', '.join(usernames)}")
+        print("MITRE ATT&CK: T1110")
+        print("Severity: MEDIUM")
 
-    else:
 
-        print("\n[INFO] Suspicious SSH activity detected.")
+# Save alerts as JSON
+if alerts:
+
+    alert_file = "../alerts/alerts.json"
+
+    with open(alert_file, "w") as file:
+        json.dump(alerts, file, indent=4)
+
+    print(f"\n[+] Structured alerts saved to: {alert_file}")
